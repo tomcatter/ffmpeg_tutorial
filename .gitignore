@@ -1,2 +1,5 @@
 .vs
 *.db
+Debug
+*/Debug
+*.opendb
