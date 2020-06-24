@@ -111,7 +111,7 @@ int main(int argc, char* argv[])
 	int y_size;
 	int ret = -1, got_picture;
 	struct SwsContext* img_convert_ctx;
-	char filepath[] = "1.mp4";
+	char filepath[] = "h:/video/6-1.mp4";
 	int screen_w = 0;
 	int screen_h = 0;
 	SDL_Window* screen;
