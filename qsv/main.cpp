@@ -101,29 +101,31 @@ static  enum AVPixelFormat get_format(AVCodecContext *avctx, const enum AVPixelF
 int main(int argc, char* argv[])
 {
 
-	AVFormatContext* pFormatCtx;
+	av_log_set_level(AV_LOG_DEBUG);
+	av_log_set_flags(AV_LOG_SKIP_REPEATED);
+	AVFormatContext* pFormatCtx = NULL;
 	int i, videoIndex;
-	AVCodecContext* pCodecCtx;
-	AVCodec* pCodec;
-	AVFrame* pFrame, *pFrameYUV, *sws_frame;
-	unsigned char* out_buffer;
-	AVPacket* packet;
+	AVCodecContext* pCodecCtx = NULL;
+	AVCodec* pCodec = NULL;
+	AVFrame* pFrame = NULL, *pFrameYUV = NULL, *sws_frame = NULL;
+	unsigned char* out_buffer = NULL;
+	AVPacket* packet = NULL;
 	int y_size;
 	int ret = -1, got_picture;
-	struct SwsContext* img_convert_ctx;
+	struct SwsContext* img_convert_ctx = NULL;
 	char filepath[] = "h:/video/6-1.mp4";
 	int screen_w = 0;
 	int screen_h = 0;
-	SDL_Window* screen;
-	SDL_Renderer* sdlRenderer;
-	SDL_Texture* sdlTexture;
+	SDL_Window* screen = NULL;
+	SDL_Renderer* sdlRenderer = NULL;
+	SDL_Texture* sdlTexture = NULL;
 	SDL_Rect sdlRect;
 	DecodeContext decode = { NULL };
-	AVCodecParserContext *parser;
+	AVCodecParserContext *parser = NULL;
 	AVStream *video_st = NULL;
 
 
-	SDL_Thread *video_tid;
+	SDL_Thread *video_tid = NULL;
 	SDL_Event event;
 
 	av_register_all();
@@ -146,6 +148,8 @@ int main(int argc, char* argv[])
 	//}
 
 	videoIndex = -1;
+
+	//ret = av_find_best_stream(pFormatCtx, AVMEDIA_TYPE_VIDEO, -1, -1, &pCodec, 0);
 
 	for (i = 0; i < pFormatCtx->nb_streams; ++i)
 	{
@@ -178,7 +182,7 @@ int main(int argc, char* argv[])
 	}
 
 
-	ret = av_hwdevice_ctx_create(&decode.hw_device_ref, AV_HWDEVICE_TYPE_QSV, "auto", NULL, 0);
+	ret = av_hwdevice_ctx_create(&decode.hw_device_ref, AV_HWDEVICE_TYPE_QSV, NULL, NULL, 0);
 	if (ret < 0) {
 		fprintf(stderr, "Cannot open the hardware device\n");
 		return -1;
@@ -187,7 +191,7 @@ int main(int argc, char* argv[])
 	pCodec = avcodec_find_decoder_by_name("h264_qsv");
 	if (!pCodec) {
 		fprintf(stderr, "The QSV decoder is not present in libavcodec\n");
-		return -1;
+	//	return -1;
 	}
 
 	parser = av_parser_init(pCodec->id);
@@ -202,6 +206,8 @@ int main(int argc, char* argv[])
 		ret = AVERROR(ENOMEM);
 		return -1;
 	}
+	if (avcodec_parameters_to_context(pCodecCtx, video_st->codecpar) < 0)
+		return -1;
 
 	pCodecCtx->codec_id = AV_CODEC_ID_H264;
 
@@ -231,8 +237,8 @@ int main(int argc, char* argv[])
 	pFrameYUV = av_frame_alloc();
 	sws_frame = av_frame_alloc();
 
-	out_buffer = (unsigned char *)av_malloc(av_image_get_buffer_size(AV_PIX_FMT_QSV, 1920, 1080, 1));
-	av_image_fill_arrays(pFrameYUV->data, pFrameYUV->linesize, out_buffer, AV_PIX_FMT_QSV, 1920, 1080, 1);
+	out_buffer = (unsigned char *)av_malloc(av_image_get_buffer_size(AV_PIX_FMT_YUV420P, pCodecCtx->width, pCodecCtx->height, 1));
+	av_image_fill_arrays(pFrameYUV->data, pFrameYUV->linesize, out_buffer, AV_PIX_FMT_YUV420P, pCodecCtx->width, pCodecCtx->height, 1);
 
 	packet = (AVPacket*)av_malloc(sizeof(AVPacket));
 
@@ -240,7 +246,8 @@ int main(int argc, char* argv[])
 	av_dump_format(pFormatCtx, 0, filepath, 0);
 
 	std::cout << "-------------------------------------------------" << std::endl;
-	//img_convert_ctx = sws_getContext(1920, 1080, AV_PIX_FMT_QSV, 1920, 1080, AV_PIX_FMT_YUV420P, SWS_BICUBIC, NULL, NULL, NULL);
+	img_convert_ctx = sws_getContext(pCodecCtx->width, pCodecCtx->height, AV_PIX_FMT_NV12, pCodecCtx->width, pCodecCtx->height,
+		AV_PIX_FMT_YUV420P, SWS_BICUBIC, NULL, NULL, NULL);
 
 
 	if (SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO | SDL_INIT_TIMER))
@@ -262,12 +269,13 @@ int main(int argc, char* argv[])
 
 	sdlRenderer = SDL_CreateRenderer(screen, -1, 0);
 
-	sdlTexture = SDL_CreateTexture(sdlRenderer, SDL_PIXELFORMAT_YVYU, SDL_TEXTUREACCESS_STREAMING, 1920, 1080);
+	sdlTexture = SDL_CreateTexture(sdlRenderer, SDL_PIXELFORMAT_IYUV, SDL_TEXTUREACCESS_STREAMING,
+		pCodecCtx->width, pCodecCtx->height);
 
 	sdlRect.x = 0;
 	sdlRect.y = 0;
-	sdlRect.w = screen_w;
-	sdlRect.h = screen_h;
+	sdlRect.w = pCodecCtx->width;
+	sdlRect.h = pCodecCtx->height;
 
 	video_tid = SDL_CreateThread(sfp_refresh_thread, NULL, NULL);
 
@@ -285,7 +293,9 @@ int main(int argc, char* argv[])
 					{
 						avcodec_flush_buffers(pCodecCtx);
 					}
-					printf("av_read_frame %d %d\n", ret, AVERROR_EOF);
+					char buf[1024] = { 0 };
+					av_strerror(ret, buf, sizeof(buf));
+					printf("av_read_frame %s %d\n", buf, ret);
 					break;
 				}
 				if (packet->stream_index == videoIndex)
@@ -333,13 +343,14 @@ int main(int argc, char* argv[])
 							fprintf(stderr, "Error transferring the data to system memory\n");
 							continue;
 						}
-						//sws_scale(img_convert_ctx, (const unsigned char* const*)sws_frame->data, sws_frame->linesize, 0, pCodecCtx->height,
-						//	pFrameYUV->data, pFrameYUV->linesize);
+						sws_scale(img_convert_ctx, (const unsigned char* const*)sws_frame->data, sws_frame->linesize, 0, pCodecCtx->height,
+							pFrameYUV->data, pFrameYUV->linesize);
 
-						//SDL_UpdateYUVTexture(sdlTexture, &sdlRect,
-						//	pFrameYUV->data[0], pFrameYUV->linesize[0],
-						//	pFrameYUV->data[1], pFrameYUV->linesize[1],
-						//	pFrameYUV->data[2], pFrameYUV->linesize[2]);
+						SDL_UpdateYUVTexture(sdlTexture, &sdlRect,
+							pFrameYUV->data[0], pFrameYUV->linesize[0],
+							pFrameYUV->data[1], pFrameYUV->linesize[1],
+							pFrameYUV->data[2], pFrameYUV->linesize[2]);
+
 					/*	for (int i = 0; i < FF_ARRAY_ELEMS(pFrameYUV->data) && pFrameYUV->data[i]; i++)
 						{
 							for (int j = 0; j < (pFrameYUV->height >> (i > 0)); j++)
@@ -350,7 +361,7 @@ int main(int argc, char* argv[])
 							
 								//avio_write(output_ctx, pFrameYUV->data[i] + j * sw_frame->linesize[i], sw_frame->width);
 
-						SDL_UpdateTexture(sdlTexture, &sdlRect, sws_frame->data[0], sws_frame->linesize[0]);
+						//SDL_UpdateTexture(sdlTexture, &sdlRect, sws_frame->data[0], sws_frame->linesize[0]);
 
 						SDL_RenderClear(sdlRenderer);
 						SDL_RenderCopy(sdlRenderer, sdlTexture, NULL, &sdlRect);
