@@ -188,6 +188,8 @@ int main(int argc, char* argv[])
 		return -1;
 	}
 
+	
+
 	pCodec = avcodec_find_decoder_by_name("h264_qsv");
 	if (!pCodec) {
 		fprintf(stderr, "The QSV decoder is not present in libavcodec\n");
@@ -201,6 +203,7 @@ int main(int argc, char* argv[])
 	}
 
 	pCodecCtx = avcodec_alloc_context3(pCodec);
+	pCodecCtx->hw_device_ctx = av_buffer_ref(decode.hw_device_ref);
 	if (!pCodecCtx)
 	{
 		ret = AVERROR(ENOMEM);
@@ -221,12 +224,9 @@ int main(int argc, char* argv[])
 		pCodecCtx->extradata_size = video_st->codecpar->extradata_size;
 	}
 
-
 	pCodecCtx->opaque = &decode;
 	pCodecCtx->get_format = get_format;
-	/*pCodecCtx->width = 1920;
-	pCodecCtx->height = 1080;
-	pCodecCtx->pix_fmt = AV_PIX_FMT_YUV420P;*/
+
 	if (avcodec_open2(pCodecCtx, NULL, NULL) < 0)
 	{
 		std::cout << "could not open codec." << std::endl;
@@ -259,7 +259,7 @@ int main(int argc, char* argv[])
 	screen_w = 1280;// pCodecCtx->width;
 	screen_h = 720;// pCodecCtx->height;
 
-	screen = SDL_CreateWindow("ffplayer", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, screen_w, screen_h, SDL_WINDOW_OPENGL);
+	screen = SDL_CreateWindow("ffplayer", 1920, SDL_WINDOWPOS_UNDEFINED, screen_w, screen_h, SDL_WINDOW_OPENGL);
 
 	if (!screen)
 	{
